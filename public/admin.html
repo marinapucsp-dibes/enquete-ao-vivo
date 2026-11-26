@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apresentador · Enquete ao vivo</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  .wrap { max-width: 860px; }
+  .q { border: 1.5px solid var(--line); border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; background: #fff; }
+  .q.active { border-color: var(--accent); box-shadow: 0 0 0 3px #e7e4ff; }
+  .q-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+  .q-text { font-weight: 600; font-size: 1.05rem; flex: 1; min-width: 200px; }
+  .mini { margin-top: 10px; font-size: .9rem; }
+  .mini .bar { height: 8px; background: var(--accent); border-radius: 4px; margin: 2px 0 6px; }
+  .ans { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .ans.hidden-ans span { text-decoration: line-through; color: var(--muted); }
+  .codebox { font-size: 2rem; font-weight: 800; letter-spacing: .15em; }
+  .sess { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- Início -->
+  <div id="home" hidden>
+    <div class="card">
+      <h1>Nova apresentação</h1>
+      <p class="muted">Crie uma sessão, adicione perguntas e projete o telão. O público responde pelo celular, de forma anônima.</p>
+      <label for="titleIn">Título</label>
+      <input id="titleIn" maxlength="80" placeholder="Ex.: Reunião geral de novembro">
+      <button id="createBtn" style="margin-top:12px">Criar sessão</button>
+    </div>
+    <div class="card" id="mine" hidden>
+      <h2>Minhas sessões neste navegador</h2>
+      <div id="mineList"></div>
+    </div>
+  </div>
+
+  <!-- Painel -->
+  <div id="panel" hidden>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <a href="/admin" class="muted">← Minhas sessões</a>
+          <h1 id="pTitle"></h1>
+          <div class="muted">Código para o público: <span class="codebox" id="pCode"></span></div>
+        </div>
+        <div class="row">
+          <a id="screenLink" target="_blank"><button>📺 Abrir telão</button></a>
+          <button id="toggleRes" class="ghost"></button>
+        </div>
+      </div>
+      <p class="muted" style="margin-bottom:0">Dica: abra o telão em outra janela e arraste para o projetor (F11 para tela cheia). Este painel fica no seu notebook.</p>
+    </div>
+
+    <div class="card">
+      <h2>Adicionar pergunta</h2>
+      <label for="qType">Tipo</label>
+      <select id="qType">
+        <option value="choice">Múltipla escolha (gráfico de barras)</option>
+        <option value="words">Nuvem de palavras</option>
+        <option value="open">Resposta aberta (mural)</option>
+      </select>
+      <label for="qText">Pergunta</label>
+      <input id="qText" maxlength="200" placeholder="Ex.: Como você avalia o evento?">
+      <div id="optsWrap">
+        <label for="qOpts">Opções (uma por linha)</label>
+        <textarea id="qOpts" rows="4" placeholder="Ótimo&#10;Bom&#10;Regular"></textarea>
+      </div>
+      <button id="addBtn" style="margin-top:12px">Adicionar</button>
+      <div id="err" class="error"></div>
+    </div>
+
+    <h2>Perguntas</h2>
+    <p class="muted">A pergunta <span class="pill">no ar</span> é a que aparece no celular do público e no telão.</p>
+    <div id="qList"></div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const socket = io();
+const store = () => { try { return JSON.parse(localStorage.getItem('mySessions') || '[]'); } catch { return []; } };
+const typeName = { choice: 'Múltipla escolha', words: 'Nuvem de palavras', open: 'Resposta aberta' };
+
+const params = new URLSearchParams(location.search);
+let code = params.get('s');
+let token = code && (store().find(x => x.code === code) || {}).token;
+
+function home() {
+  $('#home').hidden = false;
+  const list = store();
+  $('#mine').hidden = !list.length;
+  $('#mineList').innerHTML = list.slice().reverse().map(s =>
+    `<div class="sess"><div><b>${esc(s.title)}</b><div class="muted">Código ${s.code}</div></div><a href="/admin?s=${s.code}"><button class="small">Abrir</button></a></div>`).join('');
+}
+
+$('#createBtn').onclick = () => {
+  const title = $('#titleIn').value;
+  socket.emit('admin:create', { title }, res => {
+    const list = store(); list.push({ code: res.code, token: res.token, title: title || 'Minha apresentação' });
+    localStorage.setItem('mySessions', JSON.stringify(list));
+    location.href = '/admin?s=' + res.code;
+  });
+};
+
+const send = (ev, extra = {}) => socket.emit(ev, { code, token, ...extra });
+
+$('#qType').onchange = () => { $('#optsWrap').hidden = $('#qType').value !== 'choice'; };
+$('#addBtn').onclick = () => {
+  const type = $('#qType').value, text = $('#qText').value.trim();
+  if (!text) return $('#err').textContent = 'Escreva a pergunta.';
+  const options = $('#qOpts').value.split('\n').map(s => s.trim()).filter(Boolean);
+  if (type === 'choice' && options.length < 2) return $('#err').textContent = 'Informe ao menos 2 opções.';
+  $('#err').textContent = '';
+  send('admin:addQuestion', { type, text, options });
+  $('#qText').value = ''; $('#qOpts').value = '';
+};
+$('#toggleRes').onclick = () => send('admin:toggleResults');
+socket.on('erro', m => $('#err').textContent = m);
+
+socket.on('state', st => {
+  $('#pTitle').textContent = st.title;
+  $('#pCode').textContent = st.code;
+  $('#toggleRes').textContent = st.showResults ? '🙈 Ocultar resultados no telão' : '👁 Mostrar resultados no telão';
+  $('#qList').innerHTML = st.questions.length ? st.questions.map((q, n) => {
+    const active = q.id === st.activeId;
+    let mini = '';
+    if (q.type === 'choice') {
+      const max = Math.max(1, ...q.counts);
+      mini = q.options.map((o, i) => `<div>${esc(o)} — <b>${q.counts[i]}</b></div><div class="bar" style="width:${q.counts[i] / max * 100}%"></div>`).join('');
+    } else if (q.type === 'words') {
+      mini = Object.entries(q.words).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([w, c]) => `${esc(w)} (${c})`).join(' · ') || '<span class="muted">Sem palavras ainda</span>';
+    } else {
+      mini = q.answers.slice().reverse().map(a => `<div class="ans ${a.hidden ? 'hidden-ans' : ''}"><span>${esc(a.text)}</span><button class="small ghost" data-hide="${a.id}" data-q="${q.id}">${a.hidden ? 'Mostrar' : 'Ocultar'}</button></div>`).join('') || '<span class="muted">Sem respostas ainda</span>';
+    }
+    return `<div class="q ${active ? 'active' : ''}">
+      <div class="q-head">
+        <div class="q-text">${n + 1}. ${esc(q.text)} ${active ? '<span class="pill">no ar</span>' : ''}<div class="muted" style="font-weight:400">${typeName[q.type]} · ${q.total} resposta(s)</div></div>
+        <div class="row">
+          ${active ? `<button class="small ghost" data-act="">Tirar do ar</button>` : `<button class="small" data-act="${q.id}">Colocar no ar</button>`}
+          <button class="small ghost" data-reset="${q.id}">Zerar</button>
+          <button class="small danger" data-del="${q.id}">Excluir</button>
+        </div>
+      </div>
+      <div class="mini">${mini}</div>
+    </div>`;
+  }).join('') : '<p class="muted">Nenhuma pergunta ainda.</p>';
+});
+
+$('#qList').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if ('act' in b.dataset) send('admin:setActive', { id: b.dataset.act || null });
+  if (b.dataset.reset && confirm('Zerar todas as respostas desta pergunta?')) send('admin:reset', { id: b.dataset.reset });
+  if (b.dataset.del && confirm('Excluir esta pergunta?')) send('admin:delete', { id: b.dataset.del });
+  if (b.dataset.hide) send('admin:hideAnswer', { id: b.dataset.q, answerId: b.dataset.hide });
+};
+
+socket.on('connect', () => {
+  if (!code || !token) return home();
+  socket.emit('admin:join', { code, token }, res => {
+    if (!res.ok) return home();
+    $('#panel').hidden = false;
+    $('#screenLink').href = '/tela/' + code;
+  });
+});
+</script>
+</body>
+</html>

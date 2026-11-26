@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Telão · Enquete ao vivo</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  body { background: #14122b; color: #fff; overflow: hidden; height: 100vh; }
+  .screen { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; padding: 3vh 4vw; gap: 2vh; }
+  .question { font-size: clamp(1.6rem, 4vw, 3.6rem); font-weight: 800; line-height: 1.15; }
+  .stage { min-height: 0; display: flex; align-items: center; justify-content: center; }
+  .footer { display: flex; justify-content: space-between; align-items: center; color: #b9b5d8; font-size: clamp(.9rem, 1.6vw, 1.4rem); }
+  .footer b { color: #fff; letter-spacing: .08em; }
+  .count { font-size: clamp(1rem, 2vw, 1.8rem); color: #b9b5d8; }
+
+  /* Barras */
+  .bars { width: 100%; height: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 3vw; padding-top: 6vh; }
+  .bcol { flex: 1; max-width: 220px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+  .bval { font-size: clamp(1.2rem, 3vw, 3rem); font-weight: 800; margin-bottom: 1vh; }
+  .bbar { width: 100%; border-radius: 12px 12px 4px 4px; transition: height .6s cubic-bezier(.2,.8,.2,1); min-height: 6px; }
+  .blabel { margin-top: 1.5vh; text-align: center; font-size: clamp(.9rem, 1.7vw, 1.6rem); font-weight: 600; min-height: 2.6em; }
+
+  /* Nuvem */
+  .cloud { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 1vh 2.4vw; max-width: 90vw; }
+  .cloud span { font-weight: 800; line-height: 1; transition: font-size .5s; }
+
+  /* Mural */
+  .wall { columns: 3 280px; column-gap: 20px; width: 100%; height: 100%; overflow: hidden; }
+    .note.new { animation: pop .4s ease; }
+  .note { break-inside: avoid; background: #fff; color: #1d1b2e; border-radius: 14px; padding: 16px 18px; margin-bottom: 20px; font-size: clamp(1rem, 1.6vw, 1.5rem); border-top: 6px solid var(--c); }
+  @keyframes pop { from { transform: scale(.85); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  /* Espera / entrada */
+  .splash { display: flex; gap: 6vw; align-items: center; }
+  .splash img { width: min(38vh, 34vw); background: #fff; border-radius: 18px; padding: 12px; }
+  .splash .big { font-size: clamp(3rem, 9vw, 8rem); font-weight: 900; letter-spacing: .1em; }
+  .qr-small { height: 9vh; background: #fff; border-radius: 8px; padding: 4px; vertical-align: middle; margin-left: 12px; }
+  .hiddenres { font-size: clamp(1.4rem, 3vw, 2.6rem); color: #b9b5d8; text-align: center; }
+  .fs { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); opacity: .25; }
+  :fullscreen .fs { display: none; }
+  .fs:hover { opacity: 1; }
+</style>
+</head>
+<body>
+<button class="fs small ghost" onclick="document.documentElement.requestFullscreen && document.documentElement.requestFullscreen()" style="color:#fff">⛶ Tela cheia</button>
+<div class="screen">
+  <div class="row" style="justify-content:space-between;align-items:flex-start">
+    <div class="question" id="q"></div>
+    <div class="count" id="count"></div>
+  </div>
+  <div class="stage" id="stage"></div>
+  <div class="footer" id="footer"></div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const colors = ['--c1','--c2','--c3','--c4','--c5','--c6','--c7','--c8','--c9','--c10'].map(v => `var(${v})`);
+const code = location.pathname.split('/').pop();
+const host = location.host;
+const socket = io();
+let lastKey = '';
+const seen = new Set();
+
+socket.on('connect', () => socket.emit('screen:join', { code }, res => {
+  if (!res.ok) $('#q').textContent = 'Sessão não encontrada.';
+}));
+
+socket.on('state', st => {
+  const q = st.questions.find(x => x.id === st.activeId);
+  const stage = $('#stage');
+
+  if (!q) {
+    lastKey = '';
+    $('#q').textContent = st.title;
+    $('#count').textContent = '';
+    $('#footer').innerHTML = '';
+    stage.innerHTML = `<div class="splash">
+      <img src="/qr/${code}.svg" alt="QR code">
+      <div><div style="font-size:clamp(1.2rem,2.4vw,2.2rem)">Acesse <b>${esc(host)}</b><br>e use o código</div><div class="big">${code}</div></div></div>`;
+    return;
+  }
+
+  $('#q').textContent = q.text;
+  $('#count').textContent = `👥 ${q.total}`;
+  $('#footer').innerHTML = `<div>Acesse <b>${esc(host)}</b> · código <b>${code}</b></div><img class="qr-small" src="/qr/${code}.svg" alt="">`;
+
+  if (!st.showResults) { lastKey = ''; stage.innerHTML = `<div class="hiddenres">Respostas recebidas: <b style="color:#fff">${q.total}</b><br><span style="font-size:.7em">Os resultados serão revelados em instantes…</span></div>`; return; }
+
+  const key = q.id + q.type;
+  if (q.type === 'choice') {
+    // mantém os elementos para animar as barras
+    if (lastKey !== key) {
+      stage.innerHTML = `<div class="bars">${q.options.map((o, i) => `<div class="bcol"><div class="bval"></div><div class="bbar" style="height:0;background:${colors[i % colors.length]}"></div><div class="blabel">${esc(o)}</div></div>`).join('')}</div>`;
+    }
+    const total = q.counts.reduce((a, b) => a + b, 0);
+    const max = Math.max(1, ...q.counts);
+    requestAnimationFrame(() => stage.querySelectorAll('.bcol').forEach((col, i) => {
+      const n = q.counts[i];
+      col.querySelector('.bval').textContent = total ? `${Math.round(n / total * 100)}%` : '0%';
+      col.querySelector('.bbar').style.height = `calc(${n / max} * (100% - 12vh))`;
+    }));
+  } else if (q.type === 'words') {
+    const entries = Object.entries(q.words).sort((a, b) => b[1] - a[1]).slice(0, 60);
+    const max = Math.max(1, ...entries.map(e => e[1]));
+    // ordem "embaralhada" estável para a nuvem ficar bonita: maiores no meio
+    const arranged = [];
+    entries.forEach((e, i) => i % 2 ? arranged.push(e) : arranged.unshift(e));
+    stage.innerHTML = entries.length
+      ? `<div class="cloud">${arranged.map(([w, c]) => {
+          const size = 1.4 + (c / max) * 5.6;
+          const col = colors[[...w].reduce((a, ch) => a + ch.charCodeAt(0), 0) % colors.length];
+          return `<span style="font-size:clamp(1rem, ${size}vw, ${size * 1.4}rem);color:${col}" title="${c}">${esc(w)}</span>`;
+        }).join('')}</div>`
+      : `<div class="hiddenres">Aguardando palavras…</div>`;
+  } else {
+    const visible = q.answers.filter(a => !a.hidden).slice().reverse().slice(0, 30);
+    stage.innerHTML = visible.length
+      ? `<div class="wall">${visible.map(a => `<div class="note ${seen.has(a.id) ? '' : 'new'}" style="--c:${colors[a.id.charCodeAt(0) % colors.length]}">${esc(a.text)}</div>`).join('')}</div>`
+      : `<div class="hiddenres">Aguardando respostas…</div>`;
+    visible.forEach(a => seen.add(a.id));
+  }
+  lastKey = key;
+});
+</script>
+</body>
+</html>

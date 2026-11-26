@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Enquete ao vivo</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <!-- Entrar com código -->
+  <div id="join" class="card" hidden>
+    <h1>Participar</h1>
+    <p class="muted">Digite o código que aparece no telão. Suas respostas são anônimas.</p>
+    <input id="codeIn" class="code-input" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off">
+    <button id="joinBtn" class="full" style="margin-top:12px">Entrar</button>
+    <div id="joinErr" class="error"></div>
+    <p class="muted center" style="margin-top:16px">É o apresentador? <a href="/admin">Criar uma enquete</a></p>
+  </div>
+
+  <!-- Votação -->
+  <div id="vote" hidden>
+    <p class="muted" id="sessTitle"></p>
+    <div class="card" id="qCard"></div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const socket = io();
+
+// ID anônimo deste navegador (apenas para impedir voto duplo; o servidor guarda só um hash)
+let voterId = localStorage.getItem('voterId');
+if (!voterId) { voterId = crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now(); localStorage.setItem('voterId', voterId); }
+
+let code = new URLSearchParams(location.search).get('c');
+let current = null;
+
+function showJoin(msg) { $('#join').hidden = false; $('#vote').hidden = true; $('#joinErr').textContent = msg || ''; }
+
+function join() {
+  socket.emit('p:join', { code, voterId }, res => {
+    if (!res || !res.ok) { history.replaceState(null, '', '/'); return showJoin(code ? 'Código não encontrado.' : ''); }
+    history.replaceState(null, '', '/?c=' + code);
+    $('#join').hidden = true; $('#vote').hidden = false;
+    $('#sessTitle').textContent = res.title;
+    render(res.question, res.voted);
+  });
+}
+
+let renderedKey = '';
+function render(q, voted) {
+  // não apagar o que a pessoa está digitando se a pergunta não mudou
+  const key = (q ? q.id : 'none') + ':' + !!voted;
+  if (key === renderedKey) return;
+  renderedKey = key;
+  current = q;
+  const box = $('#qCard');
+  if (!q) { box.innerHTML = '<div class="center"><div class="big-check">⏳</div><h2>Aguarde…</h2><p class="muted">A próxima pergunta vai aparecer aqui automaticamente.</p></div>'; return; }
+  if (voted) { box.innerHTML = `<div class="center"><div class="big-check">✅</div><h2>Resposta enviada!</h2><p class="muted">Olhe o telão. A próxima pergunta aparece aqui sozinha.</p></div>`; return; }
+
+  let html = `<h2>${esc(q.text)}</h2>`;
+  if (q.type === 'choice') {
+    html += q.options.map((o, i) => `<button class="option" data-i="${i}">${esc(o)}</button>`).join('');
+    html += `<button id="send" class="full" disabled>Enviar</button>`;
+  } else if (q.type === 'words') {
+    html += `<p class="muted">Até 3 palavras (uma por campo).</p>
+      <input class="w" maxlength="25" placeholder="Palavra 1"><input class="w" maxlength="25" placeholder="Palavra 2 (opcional)" style="margin-top:8px"><input class="w" maxlength="25" placeholder="Palavra 3 (opcional)" style="margin-top:8px">
+      <button id="send" class="full" style="margin-top:12px">Enviar</button>`;
+  } else {
+    html += `<textarea id="txt" rows="4" maxlength="280" placeholder="Escreva sua resposta…"></textarea>
+      <button id="send" class="full" style="margin-top:12px">Enviar</button>`;
+  }
+  html += `<div id="err" class="error"></div>`;
+  box.innerHTML = html;
+
+  let choice = null;
+  box.querySelectorAll('.option').forEach(b => b.onclick = () => {
+    box.querySelectorAll('.option').forEach(x => x.classList.remove('sel'));
+    b.classList.add('sel'); choice = Number(b.dataset.i); $('#send').disabled = false;
+  });
+  $('#send').onclick = () => {
+    let value;
+    if (q.type === 'choice') value = choice;
+    else if (q.type === 'words') value = [...box.querySelectorAll('.w')].map(i => i.value);
+    else value = $('#txt').value;
+    $('#send').disabled = true;
+    socket.emit('p:vote', { code, voterId, questionId: q.id, value }, res => {
+      if (res && res.ok) render(q, true);
+      else { $('#err').textContent = (res && res.msg) || 'Erro ao enviar.'; $('#send').disabled = false; }
+    });
+  };
+}
+
+socket.on('refresh', () => { if (code) join(); });
+socket.on('connect', () => { if (code) join(); else showJoin(); });
+
+$('#joinBtn').onclick = () => { code = $('#codeIn').value.replace(/\D/g, ''); if (code.length === 6) join(); else showJoin('O código tem 6 dígitos.'); };
+$('#codeIn').addEventListener('keydown', e => { if (e.key === 'Enter') $('#joinBtn').click(); });
+</script>
+</body>
+</html>
