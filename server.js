@@ -34,8 +34,8 @@ function fromJSON(s) {
 async function loadAll() {
   if (process.env.DATABASE_URL) {
     pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
-    await pool.query('CREATE TABLE IF NOT EXISTS sessions (code TEXT PRIMARY KEY, data JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())');
-    const r = await pool.query('SELECT data FROM sessions');
+    await pool.query('CREATE TABLE IF NOT EXISTS enquete_sessions (code TEXT PRIMARY KEY, data JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())');
+    const r = await pool.query('SELECT data FROM enquete_sessions');
     for (const row of r.rows) { const s = fromJSON(row.data); sessions[s.code] = s; }
     console.log(`Banco de dados conectado: ${r.rows.length} sessão(ões) carregada(s).`);
   } else {
@@ -66,8 +66,8 @@ async function flush() {
   for (const code of codes) {
     const s = sessions[code];
     try {
-      if (s) await pool.query('INSERT INTO sessions (code, data, updated_at) VALUES ($1, $2, now()) ON CONFLICT (code) DO UPDATE SET data = EXCLUDED.data, updated_at = now()', [code, JSON.stringify(toJSON(s))]);
-      else await pool.query('DELETE FROM sessions WHERE code = $1', [code]);
+      if (s) await pool.query('INSERT INTO enquete_sessions (code, data, updated_at) VALUES ($1, $2, now()) ON CONFLICT (code) DO UPDATE SET data = EXCLUDED.data, updated_at = now()', [code, JSON.stringify(toJSON(s))]);
+      else await pool.query('DELETE FROM enquete_sessions WHERE code = $1', [code]);
     } catch (e) {
       console.error('Erro ao salvar no banco:', e.message);
       dirty.add(code); saveTimer = setTimeout(flush, 3000);
