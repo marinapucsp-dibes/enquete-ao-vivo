@@ -36,3 +36,14 @@ Os dados ficam em memória e em `data.json`. Em hospedagens gratuitas esse arqui
 4. Acesse `/admin` nesse endereço para criar sua apresentação.
 
 Observação: no plano gratuito o servidor "dorme" após 15 min sem uso e leva ~1 min para acordar. Abra o link alguns minutos antes do evento.
+
+## Salvar online (banco de dados)
+Sem banco, as sessões somem quando o servidor reinicia. Para guardar tudo online:
+1. Crie uma conta gratuita em https://neon.tech (dá para entrar com o GitHub) e crie um projeto.
+2. Copie a **connection string** (começa com `postgresql://`).
+3. No Render, abra o serviço → **Environment** → **Add Environment Variable**: nome `DATABASE_URL`, valor = a connection string. Salve (o Render reinicia o app sozinho).
+
+Qualquer Postgres funciona (Neon, Supabase, Render Postgres…). A tabela é criada automaticamente.
+
+## Abrir a sessão em outro computador
+No painel da sessão aparecem o **código** e a **chave do apresentador** (clique em *Mostrar*). Em outro computador, acesse `/admin` → *Abrir sessão criada em outro computador* e digite os dois.

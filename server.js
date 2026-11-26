@@ -6,6 +6,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const QRCode = require('qrcode');
+const { Pool } = require('pg');
 
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data.json');
@@ -14,27 +15,67 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// ---------- Armazenamento (memória + arquivo JSON) ----------
+// ---------- Armazenamento ----------
+// Com DATABASE_URL (Postgres, ex.: Neon): tudo fica salvo online e sobrevive a reinícios.
+// Sem DATABASE_URL: usa um arquivo JSON local (bom para testar no computador).
 let sessions = {};
-try {
-  const raw = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-  for (const s of Object.values(raw)) {
-    for (const q of s.questions) q.voters = new Set(q.voters || []);
-    sessions[s.code] = s;
-  }
-} catch (_) { /* sem dados anteriores */ }
+let pool = null;
 
-let saveTimer = null;
-function save() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    const out = {};
-    for (const s of Object.values(sessions)) {
-      out[s.code] = { ...s, questions: s.questions.map(q => ({ ...q, voters: [...q.voters] })) };
-    }
-    fs.writeFile(DATA_FILE, JSON.stringify(out), () => {});
-  }, 500);
+const KEY_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const newKey = () => { const b = crypto.randomBytes(8); let k = ''; for (let i = 0; i < 8; i++) k += KEY_CHARS[b[i] % KEY_CHARS.length]; return k.slice(0, 4) + '-' + k.slice(4); };
+
+const toJSON = s => ({ ...s, questions: s.questions.map(q => ({ ...q, voters: [...q.voters] })) });
+function fromJSON(s) {
+  for (const q of s.questions) q.voters = new Set(q.voters || []);
+  if (!s.adminKey) s.adminKey = newKey();
+  return s;
 }
+
+async function loadAll() {
+  if (process.env.DATABASE_URL) {
+    pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+    await pool.query('CREATE TABLE IF NOT EXISTS sessions (code TEXT PRIMARY KEY, data JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())');
+    const r = await pool.query('SELECT data FROM sessions');
+    for (const row of r.rows) { const s = fromJSON(row.data); sessions[s.code] = s; }
+    console.log(`Banco de dados conectado: ${r.rows.length} sessão(ões) carregada(s).`);
+  } else {
+    try {
+      for (const s of Object.values(JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')))) sessions[s.code] = fromJSON(s);
+    } catch (_) { /* sem dados anteriores */ }
+    console.log('Sem DATABASE_URL: salvando em arquivo local', DATA_FILE);
+  }
+}
+
+const dirty = new Set();
+let saveTimer = null;
+function save(s) {
+  if (s) dirty.add(s.code);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flush, 400);
+}
+async function flush() {
+  clearTimeout(saveTimer);
+  if (!pool) {
+    const out = {};
+    for (const s of Object.values(sessions)) out[s.code] = toJSON(s);
+    fs.writeFileSync(DATA_FILE, JSON.stringify(out));
+    dirty.clear();
+    return;
+  }
+  const codes = [...dirty]; dirty.clear();
+  for (const code of codes) {
+    const s = sessions[code];
+    try {
+      if (s) await pool.query('INSERT INTO sessions (code, data, updated_at) VALUES ($1, $2, now()) ON CONFLICT (code) DO UPDATE SET data = EXCLUDED.data, updated_at = now()', [code, JSON.stringify(toJSON(s))]);
+      else await pool.query('DELETE FROM sessions WHERE code = $1', [code]);
+    } catch (e) {
+      console.error('Erro ao salvar no banco:', e.message);
+      dirty.add(code); saveTimer = setTimeout(flush, 3000);
+    }
+  }
+}
+// O Render avisa antes de desligar: grava o que estiver pendente
+process.on('SIGTERM', async () => { try { await flush(); } finally { process.exit(0); } });
 
 const rid = (n = 8) => crypto.randomBytes(n).toString('hex');
 const hashVoter = (id, qid) => crypto.createHash('sha256').update(id + ':' + qid).digest('hex').slice(0, 16);
@@ -75,7 +116,7 @@ function broadcast(s) {
   const st = fullState(s);
   io.to('admin:' + s.code).emit('state', st);
   io.to('screen:' + s.code).emit('state', st);
-  save();
+  save(s);
 }
 
 function broadcastParticipants(s) {
@@ -100,7 +141,7 @@ function restoreSession(code, token, b) {
     };
   });
   const activeId = questions.some(q => q.id === b.activeId) ? b.activeId : null;
-  return { code, adminToken: token, title: clean(b.title, 80) || 'Minha apresentação', questions, activeId, showResults: b.showResults !== false, createdAt: Date.now() };
+  return { code, adminToken: token, adminKey: newKey(), title: clean(b.title, 80) || 'Minha apresentação', questions, activeId, showResults: b.showResults !== false, createdAt: Date.now() };
 }
 
 function getAdmin(socket, code, token) {
@@ -114,22 +155,33 @@ io.on('connection', (socket) => {
   // Apresentador
   socket.on('admin:create', ({ title } = {}, cb) => {
     const code = newCode();
-    const s = { code, adminToken: rid(16), title: clean(title, 80) || 'Minha apresentação', questions: [], activeId: null, showResults: true, createdAt: Date.now() };
+    const s = { code, adminToken: rid(16), adminKey: newKey(), title: clean(title, 80) || 'Minha apresentação', questions: [], activeId: null, showResults: true, createdAt: Date.now() };
     sessions[code] = s;
-    save();
-    cb && cb({ code, token: s.adminToken });
+    save(s);
+    cb && cb({ code, token: s.adminToken, key: s.adminKey });
   });
 
   socket.on('admin:join', ({ code, token, backup }, cb) => {
     // Servidor reiniciou e perdeu a sessão? Recria a partir da cópia guardada no navegador do apresentador.
     if (!sessions[code] && backup && /^\d{6}$/.test(String(code)) && typeof token === 'string' && token.length >= 16) {
       sessions[code] = restoreSession(code, token, backup);
-      save();
+      save(sessions[code]);
     }
     const s = getAdmin(socket, code, token); if (!s) return cb && cb({ ok: false });
     socket.join('admin:' + code);
     socket.emit('state', fullState(s));
-    cb && cb({ ok: true });
+    cb && cb({ ok: true, key: s.adminKey });
+  });
+
+  // Abrir a sessão em outro computador: código + chave do apresentador
+  let loginTries = 0;
+  socket.on('admin:login', ({ code, key } = {}, cb) => {
+    if (typeof cb !== 'function') return;
+    if (++loginTries > 10) return cb({ ok: false, msg: 'Muitas tentativas. Recarregue a página e tente de novo.' });
+    const s = sessions[String(code || '').trim()];
+    const k = String(key || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!s || s.adminKey.replace('-', '') !== k) return cb({ ok: false, msg: 'Código ou chave incorretos.' });
+    cb({ ok: true, code: s.code, token: s.adminToken, key: s.adminKey, title: s.title });
   });
 
   socket.on('admin:addQuestion', ({ code, token, type, text, options }) => {
@@ -261,4 +313,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 app.get('/tela/:code', (req, res) => res.sendFile(path.join(__dirname, 'public', 'tela.html')));
 
-server.listen(PORT, () => console.log(`Enquete rodando em http://localhost:${PORT}`));
+loadAll().then(() => {
+  server.listen(PORT, () => console.log(`Enquete rodando em http://localhost:${PORT}`));
+}).catch(e => { console.error('Não foi possível carregar os dados:', e.message); process.exit(1); });

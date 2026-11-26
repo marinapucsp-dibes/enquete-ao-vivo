@@ -15,6 +15,8 @@
   .ans { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
   .ans.hidden-ans span { text-decoration: line-through; color: var(--muted); }
   .codebox { font-size: 2rem; font-weight: 800; letter-spacing: .15em; }
+  .keybox { margin-top: 14px; padding: 12px 14px; background: #faf9ff; border: 1.5px dashed var(--line); border-radius: 12px; }
+  .keyval { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 1.15rem; font-weight: 700; letter-spacing: .08em; margin: 0 6px; }
   .sess { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
 </style>
 </head>
@@ -28,6 +30,16 @@
       <label for="titleIn">Título</label>
       <input id="titleIn" maxlength="80" placeholder="Ex.: Reunião geral de novembro">
       <button id="createBtn" style="margin-top:12px">Criar sessão</button>
+    </div>
+    <div class="card">
+      <h2>Abrir sessão criada em outro computador</h2>
+      <p class="muted">Use o código da sessão e a chave do apresentador (aparece no painel da sessão).</p>
+      <div class="row" style="align-items:flex-end">
+        <div style="flex:1;min-width:140px"><label for="loginCode">Código</label><input id="loginCode" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off"></div>
+        <div style="flex:1;min-width:140px"><label for="loginKey">Chave do apresentador</label><input id="loginKey" maxlength="9" placeholder="ABCD-1234" autocomplete="off" style="text-transform:uppercase"></div>
+        <button id="loginBtn">Abrir</button>
+      </div>
+      <div id="loginErr" class="error"></div>
     </div>
     <div class="card" id="mine" hidden>
       <h2>Minhas sessões neste navegador</h2>
@@ -48,6 +60,11 @@
           <a id="screenLink" target="_blank"><button>📺 Abrir telão</button></a>
           <button id="toggleRes" class="ghost"></button>
         </div>
+      </div>
+      <div class="keybox">
+        🔑 <b>Chave do apresentador:</b> <span id="pKey" class="keyval">••••-••••</span>
+        <button id="showKey" class="small ghost">Mostrar</button>
+        <div class="muted">Anote o <b>código</b> e a <b>chave</b>: com eles você abre e controla esta sessão em qualquer computador (menu “Abrir sessão criada em outro computador”). Não mostre a chave para o público.</div>
       </div>
       <p class="muted" style="margin-bottom:0">Dica: abra o telão em outra janela e arraste para o projetor (F11 para tela cheia). Este painel fica no seu notebook.</p>
     </div>
@@ -92,6 +109,26 @@ const params = new URLSearchParams(location.search);
 let code = params.get('s');
 let token = code && (store().find(x => x.code === code) || {}).token;
 
+let adminKey = '';
+$('#showKey').onclick = () => {
+  const shown = $('#showKey').textContent === 'Ocultar';
+  $('#pKey').textContent = shown ? '••••-••••' : adminKey;
+  $('#showKey').textContent = shown ? 'Mostrar' : 'Ocultar';
+};
+
+$('#loginBtn').onclick = () => {
+  const c = $('#loginCode').value.replace(/\D/g, ''), k = $('#loginKey').value;
+  if (c.length !== 6 || !k.trim()) return $('#loginErr').textContent = 'Preencha o código (6 dígitos) e a chave.';
+  socket.emit('admin:login', { code: c, key: k }, res => {
+    if (!res.ok) return $('#loginErr').textContent = res.msg;
+    const list = store().filter(x => x.code !== res.code);
+    list.push({ code: res.code, token: res.token, key: res.key, title: res.title });
+    localStorage.setItem('mySessions', JSON.stringify(list));
+    location.href = '/admin?s=' + res.code;
+  });
+};
+$('#loginKey').addEventListener('keydown', e => { if (e.key === 'Enter') $('#loginBtn').click(); });
+
 function home() {
   $('#home').hidden = false;
   const list = store();
@@ -103,7 +140,7 @@ function home() {
 $('#createBtn').onclick = () => {
   const title = $('#titleIn').value;
   socket.emit('admin:create', { title }, res => {
-    const list = store(); list.push({ code: res.code, token: res.token, title: title || 'Minha apresentação' });
+    const list = store(); list.push({ code: res.code, token: res.token, key: res.key, title: title || 'Minha apresentação' });
     localStorage.setItem('mySessions', JSON.stringify(list));
     location.href = '/admin?s=' + res.code;
   });
@@ -216,6 +253,8 @@ socket.on('connect', () => {
       return;
     }
     $('#panel').hidden = false;
+    adminKey = res.key || '';
+    try { const list = store(), me = list.find(x => x.code === code); if (me && res.key) { me.key = res.key; localStorage.setItem('mySessions', JSON.stringify(list)); } } catch (_) {}
     $('#screenLink').href = '/tela/' + code;
   });
 });
