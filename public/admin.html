@@ -157,6 +157,16 @@ socket.on('erro', m => $('#err').textContent = m);
 
 socket.on('state', st => {
   lastState = st;
+  // cópia de segurança no navegador, para recriar a sessão se o servidor reiniciar
+  try {
+    const list = store(), me = list.find(x => x.code === st.code);
+    if (me) {
+      me.title = st.title;
+      me.backup = { title: st.title, activeId: st.activeId, showResults: st.showResults,
+        questions: st.questions.map(({ id, type, text, options, counts, words, answers }) => ({ id, type, text, options, counts, words, answers })) };
+      localStorage.setItem('mySessions', JSON.stringify(list));
+    }
+  } catch (_) {}
   if (editingId && !st.questions.some(q => q.id === editingId)) resetForm();
   $('#pTitle').textContent = st.title;
   $('#pCode').textContent = st.code;
@@ -198,8 +208,13 @@ $('#qList').onclick = e => {
 
 socket.on('connect', () => {
   if (!code || !token) return home();
-  socket.emit('admin:join', { code, token }, res => {
-    if (!res.ok) return home();
+  const backup = (store().find(x => x.code === code) || {}).backup;
+  socket.emit('admin:join', { code, token, backup }, res => {
+    if (!res.ok) {
+      home();
+      alert('Não foi possível abrir esta sessão: o servidor reiniciou e não havia cópia salva dela neste navegador. Crie uma nova sessão (as sessões novas já ficam protegidas contra isso).');
+      return;
+    }
     $('#panel').hidden = false;
     $('#screenLink').href = '/tela/' + code;
   });

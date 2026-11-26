@@ -63,9 +63,13 @@ const socket = io();
 let lastKey = '';
 const seen = new Set();
 
-socket.on('connect', () => socket.emit('screen:join', { code }, res => {
-  if (!res.ok) $('#q').textContent = 'Sessão não encontrada.';
-}));
+// se o servidor reiniciou, espera o apresentador abrir o painel (que recria a sessão) e tenta de novo
+function joinScreen() {
+  socket.emit('screen:join', { code }, res => {
+    if (!res.ok) { $('#q').textContent = 'Aguardando a sessão… abra o painel do apresentador.'; setTimeout(joinScreen, 3000); }
+  });
+}
+socket.on('connect', joinScreen);
 
 socket.on('state', st => {
   const q = st.questions.find(x => x.id === st.activeId);

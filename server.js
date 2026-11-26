@@ -83,6 +83,26 @@ function broadcastParticipants(s) {
   io.to('p:' + s.code).emit('refresh');
 }
 
+function restoreSession(code, token, b) {
+  const num = n => Math.max(0, Math.floor(Number(n) || 0));
+  const questions = (Array.isArray(b.questions) ? b.questions : []).slice(0, 100).map(q => {
+    const type = ['choice', 'words', 'open'].includes(q.type) ? q.type : 'open';
+    const options = type === 'choice' ? (q.options || []).map(o => clean(o, 80)).filter(Boolean).slice(0, 10) : [];
+    const words = {};
+    if (type === 'words' && q.words && typeof q.words === 'object') {
+      for (const [w, c] of Object.entries(q.words).slice(0, 500)) { const k = clean(w, 25).toLowerCase(); if (k) words[k] = num(c); }
+    }
+    return {
+      id: clean(q.id, 20) || rid(6), v: 0, type, text: clean(q.text, 200) || 'Pergunta',
+      options, counts: options.map((_, i) => num((q.counts || [])[i])), words,
+      answers: type === 'open' ? (q.answers || []).slice(0, 1000).map(a => ({ id: clean(a.id, 12) || rid(4), text: clean(a.text, 280), at: num(a.at), hidden: !!a.hidden })).filter(a => a.text) : [],
+      voters: new Set(),
+    };
+  });
+  const activeId = questions.some(q => q.id === b.activeId) ? b.activeId : null;
+  return { code, adminToken: token, title: clean(b.title, 80) || 'Minha apresentação', questions, activeId, showResults: b.showResults !== false, createdAt: Date.now() };
+}
+
 function getAdmin(socket, code, token) {
   const s = sessions[code];
   if (!s || s.adminToken !== token) { socket.emit('erro', 'Sessão não encontrada ou sem permissão.'); return null; }
@@ -100,7 +120,12 @@ io.on('connection', (socket) => {
     cb && cb({ code, token: s.adminToken });
   });
 
-  socket.on('admin:join', ({ code, token }, cb) => {
+  socket.on('admin:join', ({ code, token, backup }, cb) => {
+    // Servidor reiniciou e perdeu a sessão? Recria a partir da cópia guardada no navegador do apresentador.
+    if (!sessions[code] && backup && /^\d{6}$/.test(String(code)) && typeof token === 'string' && token.length >= 16) {
+      sessions[code] = restoreSession(code, token, backup);
+      save();
+    }
     const s = getAdmin(socket, code, token); if (!s) return cb && cb({ ok: false });
     socket.join('admin:' + code);
     socket.emit('state', fullState(s));

@@ -27,7 +27,7 @@ Abra http://localhost:3000/admin. Para o público acessar na mesma rede Wi-Fi, a
 ## Colocar na internet
 Precisa de uma hospedagem que suporte WebSocket (servidor Node que fica ligado), por exemplo **Render**, **Railway** ou **Fly.io**: comando de build `npm install` e de início `npm start`. (Vercel/Netlify sem servidor não servem para o tempo real.)
 
-Os dados ficam em memória e em `data.json`. Em hospedagens gratuitas esse arquivo pode ser apagado quando o servidor reinicia.
+Os dados ficam em memória e em `data.json`. Em hospedagens gratuitas esse arquivo é apagado quando o servidor reinicia. Por isso, o navegador do apresentador guarda uma cópia de cada sessão (perguntas e resultados): ao abrir o painel `/admin`, a sessão é recriada automaticamente com o mesmo código.
 
 ### Publicar no Render (passo a passo)
 1. Entre em https://render.com com sua conta do GitHub.
