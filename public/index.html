@@ -52,7 +52,7 @@ function join() {
 let renderedKey = '';
 function render(q, voted) {
   // não apagar o que a pessoa está digitando se a pergunta não mudou
-  const key = (q ? q.id : 'none') + ':' + !!voted;
+  const key = (q ? q.id + '.' + q.v : 'none') + ':' + !!voted;
   if (key === renderedKey) return;
   renderedKey = key;
   current = q;

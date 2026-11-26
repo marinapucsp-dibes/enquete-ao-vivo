@@ -88,7 +88,7 @@ socket.on('state', st => {
 
   if (!st.showResults) { lastKey = ''; stage.innerHTML = `<div class="hiddenres">Respostas recebidas: <b style="color:#fff">${q.total}</b><br><span style="font-size:.7em">Os resultados serão revelados em instantes…</span></div>`; return; }
 
-  const key = q.id + q.type;
+  const key = q.id + q.type + JSON.stringify(q.options);
   if (q.type === 'choice') {
     // mantém os elementos para animar as barras
     if (lastKey !== key) {

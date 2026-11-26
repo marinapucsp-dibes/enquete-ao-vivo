@@ -68,7 +68,7 @@ function fullState(s) {
 function publicQuestion(s) {
   const q = s.questions.find(x => x.id === s.activeId);
   if (!q) return null;
-  return { id: q.id, type: q.type, text: q.text, options: q.options };
+  return { id: q.id, v: q.v || 0, type: q.type, text: q.text, options: q.options };
 }
 
 function broadcast(s) {
@@ -124,7 +124,30 @@ io.on('connection', (socket) => {
     broadcast(s); broadcastParticipants(s);
   });
 
-  socket.on('admin:setActive', ({ code, token, id }) => {
+  socket.on('admin:editQuestion', ({ code, token, id, type, text, options }) => {
+    const s = getAdmin(socket, code, token); if (!s) return;
+    const q = s.questions.find(x => x.id === id); if (!q) return;
+    if (!['choice', 'words', 'open'].includes(type)) return;
+    let opts = [];
+    if (type === 'choice') {
+      opts = (options || []).map(o => clean(o, 80)).filter(Boolean).slice(0, 10);
+      if (opts.length < 2) return socket.emit('erro', 'Informe ao menos 2 opções.');
+    }
+    q.text = clean(text, 200) || q.text;
+    if (type !== q.type) {
+      // mudou o tipo: respostas antigas não fazem sentido, começa do zero
+      q.type = type; q.options = opts; q.counts = opts.map(() => 0);
+      q.words = {}; q.answers = []; q.voters = new Set();
+    } else if (type === 'choice') {
+      // mantém os votos das opções que continuam com o mesmo texto
+      const old = new Map(q.options.map((o, i) => [o, q.counts[i]]));
+      q.options = opts; q.counts = opts.map(o => old.get(o) || 0);
+    }
+    q.v = (q.v || 0) + 1;
+    broadcast(s); broadcastParticipants(s);
+  });
+
+  socket.on('admin:setActive',({ code, token, id }) => {
     const s = getAdmin(socket, code, token); if (!s) return;
     s.activeId = s.questions.some(q => q.id === id) ? id : null;
     broadcast(s); broadcastParticipants(s);

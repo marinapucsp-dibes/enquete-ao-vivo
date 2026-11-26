@@ -52,8 +52,8 @@
       <p class="muted" style="margin-bottom:0">Dica: abra o telão em outra janela e arraste para o projetor (F11 para tela cheia). Este painel fica no seu notebook.</p>
     </div>
 
-    <div class="card">
-      <h2>Adicionar pergunta</h2>
+    <div class="card" id="formCard">
+      <h2 id="formTitle">Adicionar pergunta</h2>
       <label for="qType">Tipo</label>
       <select id="qType">
         <option value="choice">Múltipla escolha (gráfico de barras)</option>
@@ -66,7 +66,11 @@
         <label for="qOpts">Opções (uma por linha)</label>
         <textarea id="qOpts" rows="4" placeholder="Ótimo&#10;Bom&#10;Regular"></textarea>
       </div>
-      <button id="addBtn" style="margin-top:12px">Adicionar</button>
+      <p id="editWarn" class="muted" hidden>⚠️ Se você mudar o <b>tipo</b>, as respostas desta pergunta serão apagadas. Se mudar só o texto, elas são mantidas.</p>
+      <div class="row" style="margin-top:12px">
+        <button id="addBtn">Adicionar</button>
+        <button id="cancelEdit" class="ghost" hidden>Cancelar</button>
+      </div>
       <div id="err" class="error"></div>
     </div>
 
@@ -108,19 +112,52 @@ $('#createBtn').onclick = () => {
 const send = (ev, extra = {}) => socket.emit(ev, { code, token, ...extra });
 
 $('#qType').onchange = () => { $('#optsWrap').hidden = $('#qType').value !== 'choice'; };
+let editingId = null, lastState = null;
+
+function resetForm() {
+  editingId = null;
+  $('#formTitle').textContent = 'Adicionar pergunta';
+  $('#addBtn').textContent = 'Adicionar';
+  $('#cancelEdit').hidden = true; $('#editWarn').hidden = true;
+  $('#qText').value = ''; $('#qOpts').value = '';
+  $('#err').textContent = '';
+}
+
+function startEdit(id) {
+  const q = lastState && lastState.questions.find(x => x.id === id); if (!q) return;
+  editingId = id;
+  $('#formTitle').textContent = 'Editar pergunta';
+  $('#addBtn').textContent = 'Salvar alterações';
+  $('#cancelEdit').hidden = false; $('#editWarn').hidden = false;
+  $('#qType').value = q.type; $('#qType').onchange();
+  $('#qText').value = q.text;
+  $('#qOpts').value = q.options.join('\n');
+  $('#err').textContent = '';
+  $('#formCard').scrollIntoView({ behavior: 'smooth' });
+  $('#qText').focus();
+}
+
+$('#cancelEdit').onclick = resetForm;
 $('#addBtn').onclick = () => {
   const type = $('#qType').value, text = $('#qText').value.trim();
   if (!text) return $('#err').textContent = 'Escreva a pergunta.';
   const options = $('#qOpts').value.split('\n').map(s => s.trim()).filter(Boolean);
   if (type === 'choice' && options.length < 2) return $('#err').textContent = 'Informe ao menos 2 opções.';
-  $('#err').textContent = '';
-  send('admin:addQuestion', { type, text, options });
-  $('#qText').value = ''; $('#qOpts').value = '';
+  if (editingId) {
+    const q = lastState.questions.find(x => x.id === editingId);
+    if (q && q.type !== type && q.total > 0 && !confirm(`Mudar o tipo vai apagar as ${q.total} resposta(s) desta pergunta. Continuar?`)) return;
+    send('admin:editQuestion', { id: editingId, type, text, options });
+  } else {
+    send('admin:addQuestion', { type, text, options });
+  }
+  resetForm();
 };
 $('#toggleRes').onclick = () => send('admin:toggleResults');
 socket.on('erro', m => $('#err').textContent = m);
 
 socket.on('state', st => {
+  lastState = st;
+  if (editingId && !st.questions.some(q => q.id === editingId)) resetForm();
   $('#pTitle').textContent = st.title;
   $('#pCode').textContent = st.code;
   $('#toggleRes').textContent = st.showResults ? '🙈 Ocultar resultados no telão' : '👁 Mostrar resultados no telão';
@@ -140,6 +177,7 @@ socket.on('state', st => {
         <div class="q-text">${n + 1}. ${esc(q.text)} ${active ? '<span class="pill">no ar</span>' : ''}<div class="muted" style="font-weight:400">${typeName[q.type]} · ${q.total} resposta(s)</div></div>
         <div class="row">
           ${active ? `<button class="small ghost" data-act="">Tirar do ar</button>` : `<button class="small" data-act="${q.id}">Colocar no ar</button>`}
+          <button class="small ghost" data-edit="${q.id}">✏️ Editar</button>
           <button class="small ghost" data-reset="${q.id}">Zerar</button>
           <button class="small danger" data-del="${q.id}">Excluir</button>
         </div>
@@ -151,7 +189,8 @@ socket.on('state', st => {
 
 $('#qList').onclick = e => {
   const b = e.target.closest('button'); if (!b) return;
-  if ('act' in b.dataset) send('admin:setActive', { id: b.dataset.act || null });
+  if (b.dataset.edit) startEdit(b.dataset.edit);
+  if ('act' in b.dataset)send('admin:setActive', { id: b.dataset.act || null });
   if (b.dataset.reset && confirm('Zerar todas as respostas desta pergunta?')) send('admin:reset', { id: b.dataset.reset });
   if (b.dataset.del && confirm('Excluir esta pergunta?')) send('admin:delete', { id: b.dataset.del });
   if (b.dataset.hide) send('admin:hideAnswer', { id: b.dataset.q, answerId: b.dataset.hide });
