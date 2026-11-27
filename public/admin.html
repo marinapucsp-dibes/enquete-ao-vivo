@@ -5,19 +5,35 @@
 <title>Apresentador · Enquete ao vivo</title>
 <link rel="stylesheet" href="/style.css">
 <style>
-  .wrap { max-width: 860px; }
+  .wrap { max-width: 880px; }
   .q { border: 1.5px solid var(--line); border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; background: #fff; }
   .q.active { border-color: var(--accent); box-shadow: 0 0 0 3px #e7e4ff; }
   .q-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
   .q-text { font-weight: 600; font-size: 1.05rem; flex: 1; min-width: 200px; }
   .mini { margin-top: 10px; font-size: .9rem; }
   .mini .bar { height: 8px; background: var(--accent); border-radius: 4px; margin: 2px 0 6px; }
+  .mini .bar.ok { background: var(--ok); }
   .ans { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
   .ans.hidden-ans span { text-decoration: line-through; color: var(--muted); }
   .codebox { font-size: 2rem; font-weight: 800; letter-spacing: .15em; }
   .keybox { margin-top: 14px; padding: 12px 14px; background: #faf9ff; border: 1.5px dashed var(--line); border-radius: 12px; }
   .keyval { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 1.15rem; font-weight: 700; letter-spacing: .08em; margin: 0 6px; }
   .sess { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+  .nav { position: sticky; top: 0; z-index: 5; display: flex; gap: 10px; align-items: center; background: var(--card); border: 1.5px solid var(--accent); border-radius: 14px; padding: 10px 12px; margin-bottom: 14px; box-shadow: 0 6px 18px rgba(40, 30, 120, .08); }
+  .nav .now { flex: 1; min-width: 0; text-align: center; }
+  .nav .now b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nav button { white-space: nowrap; }
+  .pill.ok { background: #e3f6ee; color: var(--ok); }
+  .pill.quiz { background: #fff3dc; color: #a56a00; }
+  .qrwrap { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+  .qrwrap canvas { width: 180px; height: auto; border: 1px solid var(--line); border-radius: 10px; }
+  .qrwrap .actions { flex: 1; min-width: 240px; }
+  .linkbox { font-family: ui-monospace, Menlo, Consolas, monospace; background: #f3f2f8; border-radius: 8px; padding: 8px 10px; word-break: break-all; font-size: .9rem; margin: 8px 0; }
+  .rk { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+  .order { display: inline-flex; flex-direction: column; gap: 2px; margin-right: 4px; }
+  .order button { padding: 0 8px; font-size: .75rem; line-height: 1.3; border-radius: 6px; }
+  .ok-msg { color: var(--ok); min-height: 1.2em; font-size: .9rem; }
+  @media (max-width: 560px) { .nav { flex-wrap: wrap; } .nav .now { order: -1; flex-basis: 100%; } .nav > button { flex: 1; } }
 </style>
 </head>
 <body>
@@ -59,6 +75,7 @@
         <div class="row">
           <a id="screenLink" target="_blank"><button>📺 Abrir telão</button></a>
           <button id="toggleRes" class="ghost"></button>
+          <a id="exportLink"><button class="ghost">⬇️ Exportar Excel</button></a>
         </div>
       </div>
       <div class="keybox">
@@ -69,11 +86,29 @@
       <p class="muted" style="margin-bottom:0">Dica: abra o telão em outra janela e arraste para o projetor (F11 para tela cheia). Este painel fica no seu notebook.</p>
     </div>
 
+    <div class="card">
+      <h2>📱 QR code para colocar no slide</h2>
+      <div class="qrwrap">
+        <canvas id="qrCanvas" width="1000" height="1180" aria-label="QR code da sessão"></canvas>
+        <div class="actions">
+          <p class="muted" style="margin-top:0">Quem apontar a câmera do celular entra direto nesta sessão. O código não muda, então pode colocar no PowerPoint com antecedência.</p>
+          <div class="row">
+            <button id="copyQr">📋 Copiar imagem</button>
+            <button id="downloadQr" class="ghost">⬇️ Baixar imagem</button>
+          </div>
+          <div class="linkbox" id="pLink"></div>
+          <button id="copyLink" class="small ghost">Copiar link</button>
+          <div id="qrMsg" class="ok-msg"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="card" id="formCard">
       <h2 id="formTitle">Adicionar pergunta</h2>
       <label for="qType">Tipo</label>
       <select id="qType">
-        <option value="choice">Múltipla escolha (gráfico de barras)</option>
+        <option value="choice">Múltipla escolha / Quiz (gráfico de barras)</option>
+        <option value="scale">Escala (notas de 1 a 5 ou de 0 a 10)</option>
         <option value="words">Nuvem de palavras</option>
         <option value="open">Resposta aberta (mural)</option>
       </select>
@@ -82,8 +117,19 @@
       <div id="optsWrap">
         <label for="qOpts">Opções (uma por linha)</label>
         <textarea id="qOpts" rows="4" placeholder="Ótimo&#10;Bom&#10;Regular"></textarea>
+        <label for="qCorrect">Resposta correta <span class="pill quiz">quiz</span></label>
+        <select id="qCorrect"><option value="">Nenhuma (é só uma enquete)</option></select>
+        <p class="muted" style="margin:6px 0 0">Se marcar a resposta correta, vira pergunta de <b>quiz</b>: quem acerta ganha pontos (mais pontos para quem responde mais rápido) e entra no ranking.</p>
       </div>
-      <p id="editWarn" class="muted" hidden>⚠️ Se você mudar o <b>tipo</b>, as respostas desta pergunta serão apagadas. Se mudar só o texto, elas são mantidas.</p>
+      <div id="scaleWrap" hidden>
+        <label for="qScale">Escala</label>
+        <select id="qScale"><option value="1-5">De 1 a 5</option><option value="0-10">De 0 a 10</option></select>
+        <div class="row">
+          <div style="flex:1;min-width:180px"><label for="qLo">Texto da nota mais baixa (opcional)</label><input id="qLo" maxlength="40" placeholder="Ex.: Discordo totalmente"></div>
+          <div style="flex:1;min-width:180px"><label for="qHi">Texto da nota mais alta (opcional)</label><input id="qHi" maxlength="40" placeholder="Ex.: Concordo totalmente"></div>
+        </div>
+      </div>
+      <p id="editWarn" class="muted" hidden>⚠️ Se você mudar o <b>tipo</b> (ou a escala), as respostas desta pergunta serão apagadas. Se mudar só o texto, elas são mantidas.</p>
       <div class="row" style="margin-top:12px">
         <button id="addBtn">Adicionar</button>
         <button id="cancelEdit" class="ghost" hidden>Cancelar</button>
@@ -92,8 +138,23 @@
     </div>
 
     <h2>Perguntas</h2>
-    <p class="muted">A pergunta <span class="pill">no ar</span> é a que aparece no celular do público e no telão.</p>
+    <div class="nav" id="nav">
+      <button id="prevBtn" class="ghost">◀ Anterior</button>
+      <div class="now"><span class="muted" id="navPos"></span><b id="navText"></b></div>
+      <button id="nextBtn">Próxima ▶</button>
+      <button id="rankBtn" class="ghost" hidden>🏆 Ranking</button>
+    </div>
+    <p class="muted">A pergunta <span class="pill">no ar</span> é a que aparece no celular do público e no telão. Use as <b>setas ← →</b> do teclado (ou o passador de slides) para avançar.</p>
     <div id="qList"></div>
+
+    <div class="card" id="rankCard" hidden>
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">🏆 Ranking do quiz</h2>
+        <button id="resetRank" class="small danger">Zerar ranking</button>
+      </div>
+      <p class="muted">Só aparece quem escolheu um apelido. Use “remover” para tirar um apelido impróprio do ranking.</p>
+      <div id="rankList"></div>
+    </div>
   </div>
 </div>
 
@@ -103,7 +164,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 const socket = io();
 const store = () => { try { return JSON.parse(localStorage.getItem('mySessions') || '[]'); } catch { return []; } };
-const typeName = { choice: 'Múltipla escolha', words: 'Nuvem de palavras', open: 'Resposta aberta' };
+const typeName = { choice: 'Múltipla escolha', scale: 'Escala', words: 'Nuvem de palavras', open: 'Resposta aberta' };
 
 const params = new URLSearchParams(location.search);
 let code = params.get('s');
@@ -148,7 +209,56 @@ $('#createBtn').onclick = () => {
 
 const send = (ev, extra = {}) => socket.emit(ev, { code, token, ...extra });
 
-$('#qType').onchange = () => { $('#optsWrap').hidden = $('#qType').value !== 'choice'; };
+// ---------- QR code para o slide ----------
+const participantLink = () => `${location.origin}/?c=${code}`;
+function drawQr() {
+  const cv = $('#qrCanvas'), ctx = cv.getContext('2d');
+  const img = new Image();
+  img.onload = () => {
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(img, 50, 30, 900, 900);
+    ctx.fillStyle = '#1d1b2e'; ctx.textAlign = 'center';
+    ctx.font = '600 44px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+    ctx.fillText(location.host, 500, 1010);
+    ctx.font = '800 92px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+    ctx.fillText('código ' + code, 500, 1120);
+  };
+  img.src = `/qr/${code}.png?w=900`;
+}
+const qrBlob = () => new Promise(r => $('#qrCanvas').toBlob(r, 'image/png'));
+const flash = m => { $('#qrMsg').textContent = m; setTimeout(() => $('#qrMsg').textContent = '', 4000); };
+$('#copyQr').onclick = async () => {
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': qrBlob() })]);
+    flash('✔ Imagem copiada! No PowerPoint, clique no slide e aperte Ctrl+V.');
+  } catch (_) { flash('Seu navegador não deixou copiar. Use “Baixar imagem” e insira no slide.'); }
+};
+$('#downloadQr').onclick = async () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(await qrBlob());
+  a.download = `qrcode-${code}.png`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+};
+$('#copyLink').onclick = async () => {
+  try { await navigator.clipboard.writeText(participantLink()); flash('✔ Link copiado!'); } catch (_) { flash('Selecione o link acima e copie com Ctrl+C.'); }
+};
+
+// ---------- Formulário de pergunta ----------
+function syncForm() {
+  const t = $('#qType').value;
+  $('#optsWrap').hidden = t !== 'choice';
+  $('#scaleWrap').hidden = t !== 'scale';
+}
+function syncCorrect(selected) {
+  const cur = selected !== undefined ? selected : $('#qCorrect').value;
+  const opts = $('#qOpts').value.split('\n').map(s => s.trim()).filter(Boolean);
+  $('#qCorrect').innerHTML = '<option value="">Nenhuma (é só uma enquete)</option>' +
+    opts.map((o, i) => `<option value="${i}">${esc(o)}</option>`).join('');
+  $('#qCorrect').value = cur !== null && cur !== '' && Number(cur) < opts.length ? String(cur) : '';
+}
+$('#qType').onchange = syncForm;
+$('#qOpts').oninput = () => syncCorrect();
+
 let editingId = null, lastState = null;
 
 function resetForm() {
@@ -156,7 +266,8 @@ function resetForm() {
   $('#formTitle').textContent = 'Adicionar pergunta';
   $('#addBtn').textContent = 'Adicionar';
   $('#cancelEdit').hidden = true; $('#editWarn').hidden = true;
-  $('#qText').value = ''; $('#qOpts').value = '';
+  $('#qText').value = ''; $('#qOpts').value = ''; $('#qLo').value = ''; $('#qHi').value = '';
+  syncCorrect('');
   $('#err').textContent = '';
 }
 
@@ -166,9 +277,12 @@ function startEdit(id) {
   $('#formTitle').textContent = 'Editar pergunta';
   $('#addBtn').textContent = 'Salvar alterações';
   $('#cancelEdit').hidden = false; $('#editWarn').hidden = false;
-  $('#qType').value = q.type; $('#qType').onchange();
+  $('#qType').value = q.type; syncForm();
   $('#qText').value = q.text;
-  $('#qOpts').value = q.options.join('\n');
+  $('#qOpts').value = q.type === 'choice' ? q.options.join('\n') : '';
+  syncCorrect(q.correct === null ? '' : q.correct);
+  $('#qScale').value = q.scale || '1-5';
+  $('#qLo').value = (q.scaleLabels || [])[0] || ''; $('#qHi').value = (q.scaleLabels || [])[1] || '';
   $('#err').textContent = '';
   $('#formCard').scrollIntoView({ behavior: 'smooth' });
   $('#qText').focus();
@@ -180,18 +294,44 @@ $('#addBtn').onclick = () => {
   if (!text) return $('#err').textContent = 'Escreva a pergunta.';
   const options = $('#qOpts').value.split('\n').map(s => s.trim()).filter(Boolean);
   if (type === 'choice' && options.length < 2) return $('#err').textContent = 'Informe ao menos 2 opções.';
+  const data = { type, text, options, correct: $('#qCorrect').value, scale: $('#qScale').value, scaleLabels: [$('#qLo').value, $('#qHi').value] };
   if (editingId) {
     const q = lastState.questions.find(x => x.id === editingId);
-    if (q && q.type !== type && q.total > 0 && !confirm(`Mudar o tipo vai apagar as ${q.total} resposta(s) desta pergunta. Continuar?`)) return;
-    send('admin:editQuestion', { id: editingId, type, text, options });
+    const kindChanged = q && (q.type !== type || (type === 'scale' && q.scale !== data.scale));
+    if (kindChanged && q.total > 0 && !confirm(`Mudar o tipo vai apagar as ${q.total} resposta(s) desta pergunta. Continuar?`)) return;
+    send('admin:editQuestion', { id: editingId, ...data });
   } else {
-    send('admin:addQuestion', { type, text, options });
+    send('admin:addQuestion', data);
   }
   resetForm();
 };
 $('#toggleRes').onclick = () => send('admin:toggleResults');
 socket.on('erro', m => $('#err').textContent = m);
 
+// ---------- Navegação: anterior / próxima ----------
+function go(dir) {
+  if (!lastState || !lastState.questions.length) return;
+  const qs = lastState.questions, i = qs.findIndex(q => q.id === lastState.activeId);
+  let j;
+  if (i < 0) j = dir > 0 ? 0 : qs.length - 1;
+  else j = Math.min(qs.length - 1, Math.max(0, i + dir));
+  if (i === j && lastState.screen !== 'ranking') return;
+  send('admin:setActive', { id: qs[j].id });
+}
+$('#prevBtn').onclick = () => go(-1);
+$('#nextBtn').onclick = () => go(1);
+$('#rankBtn').onclick = () => send('admin:screen', { screen: lastState.screen === 'ranking' ? 'question' : 'ranking' });
+document.addEventListener('keydown', e => {
+  if ($('#panel').hidden || e.ctrlKey || e.altKey || e.metaKey) return;
+  if (e.target.closest('input, textarea, select')) return;
+  if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); go(1); }
+  if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); go(-1); }
+});
+
+$('#resetRank').onclick = () => { if (confirm('Zerar a pontuação de todos no ranking?')) send('admin:resetRanking'); };
+$('#rankList').onclick = e => { const b = e.target.closest('button[data-rm]'); if (b && confirm('Remover este apelido do ranking?')) send('admin:hidePlayer', { playerId: b.dataset.rm }); };
+
+// ---------- Estado ----------
 socket.on('state', st => {
   lastState = st;
   // cópia de segurança no navegador, para recriar a sessão se o servidor reiniciar
@@ -200,7 +340,7 @@ socket.on('state', st => {
     if (me) {
       me.title = st.title;
       me.backup = { title: st.title, activeId: st.activeId, showResults: st.showResults,
-        questions: st.questions.map(({ id, type, text, options, counts, words, answers }) => ({ id, type, text, options, counts, words, answers })) };
+        questions: st.questions.map(({ id, type, text, options, correct, revealed, scale, scaleLabels, counts, words, answers }) => ({ id, type, text, options, correct, revealed, scale, scaleLabels, counts, words, answers })) };
       localStorage.setItem('mySessions', JSON.stringify(list));
     }
   } catch (_) {}
@@ -208,22 +348,49 @@ socket.on('state', st => {
   $('#pTitle').textContent = st.title;
   $('#pCode').textContent = st.code;
   $('#toggleRes').textContent = st.showResults ? '🙈 Ocultar resultados no telão' : '👁 Mostrar resultados no telão';
-  $('#qList').innerHTML = st.questions.length ? st.questions.map((q, n) => {
+
+  // barra de navegação
+  const qs = st.questions, i = qs.findIndex(q => q.id === st.activeId);
+  $('#navPos').textContent = st.screen === 'ranking' ? '🏆 Ranking no telão' : i >= 0 ? `No ar: pergunta ${i + 1} de ${qs.length}` : (qs.length ? 'Nenhuma pergunta no ar (telão mostra o QR code)' : 'Adicione perguntas abaixo');
+  $('#navText').textContent = i >= 0 && st.screen !== 'ranking' ? qs[i].text : '';
+  $('#prevBtn').disabled = !qs.length || (i === 0 && st.screen !== 'ranking');
+  $('#nextBtn').disabled = !qs.length || (i === qs.length - 1 && st.screen !== 'ranking');
+  $('#rankBtn').hidden = !st.hasQuiz;
+  $('#rankBtn').textContent = st.screen === 'ranking' ? '↩ Voltar à pergunta' : '🏆 Mostrar ranking';
+
+  // ranking
+  $('#rankCard').hidden = !st.hasQuiz;
+  $('#rankList').innerHTML = st.ranking.length
+    ? st.ranking.map((p, n) => `<div class="rk"><span><b>${n + 1}º</b> ${esc(p.name)} — ${p.score} pts</span><button class="small ghost" data-rm="${p.id}">remover</button></div>`).join('')
+    : '<p class="muted">Ninguém pontuou ainda.</p>';
+
+  $('#qList').innerHTML = qs.length ? qs.map((q, n) => {
     const active = q.id === st.activeId;
+    const quiz = q.correct !== null;
     let mini = '';
-    if (q.type === 'choice') {
+    if (q.type === 'choice' || q.type === 'scale') {
       const max = Math.max(1, ...q.counts);
-      mini = q.options.map((o, i) => `<div>${esc(o)} — <b>${q.counts[i]}</b></div><div class="bar" style="width:${q.counts[i] / max * 100}%"></div>`).join('');
+      mini = q.options.map((o, k) => `<div>${quiz && q.correct === k ? '✔ ' : ''}${esc(o)} — <b>${q.counts[k]}</b></div><div class="bar ${quiz && q.correct === k ? 'ok' : ''}" style="width:${q.counts[k] / max * 100}%"></div>`).join('');
+      if (q.type === 'scale') {
+        const tot = q.counts.reduce((a, b) => a + b, 0);
+        mini = `<div style="margin-bottom:6px"><b>Média: ${tot ? (q.counts.reduce((a, c, k) => a + c * Number(q.options[k]), 0) / tot).toFixed(1).replace('.', ',') : '—'}</b></div>` + mini;
+      }
     } else if (q.type === 'words') {
       mini = Object.entries(q.words).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([w, c]) => `${esc(w)} (${c})`).join(' · ') || '<span class="muted">Sem palavras ainda</span>';
     } else {
       mini = q.answers.slice().reverse().map(a => `<div class="ans ${a.hidden ? 'hidden-ans' : ''}"><span>${esc(a.text)}</span><button class="small ghost" data-hide="${a.id}" data-q="${q.id}">${a.hidden ? 'Mostrar' : 'Ocultar'}</button></div>`).join('') || '<span class="muted">Sem respostas ainda</span>';
     }
+    const kind = quiz ? 'Quiz' : typeName[q.type] + (q.type === 'scale' ? ` (${q.scale === '0-10' ? '0 a 10' : '1 a 5'})` : '');
     return `<div class="q ${active ? 'active' : ''}">
       <div class="q-head">
-        <div class="q-text">${n + 1}. ${esc(q.text)} ${active ? '<span class="pill">no ar</span>' : ''}<div class="muted" style="font-weight:400">${typeName[q.type]} · ${q.total} resposta(s)</div></div>
+        <div class="q-text">
+          <span class="order"><button class="ghost" data-up="${q.id}" title="Subir" ${n === 0 ? 'disabled' : ''}>▲</button><button class="ghost" data-down="${q.id}" title="Descer" ${n === qs.length - 1 ? 'disabled' : ''}>▼</button></span>
+          ${n + 1}. ${esc(q.text)} ${active ? '<span class="pill">no ar</span>' : ''} ${quiz ? `<span class="pill quiz">quiz</span>` : ''} ${quiz && q.revealed ? '<span class="pill ok">resposta revelada</span>' : ''}
+          <div class="muted" style="font-weight:400">${kind} · ${q.total} resposta(s)</div>
+        </div>
         <div class="row">
           ${active ? `<button class="small ghost" data-act="">Tirar do ar</button>` : `<button class="small" data-act="${q.id}">Colocar no ar</button>`}
+          ${quiz ? `<button class="small ${q.revealed ? 'ghost' : ''}" data-reveal="${q.id}">${q.revealed ? 'Esconder resposta' : '✔ Revelar resposta'}</button>` : ''}
           <button class="small ghost" data-edit="${q.id}">✏️ Editar</button>
           <button class="small ghost" data-reset="${q.id}">Zerar</button>
           <button class="small danger" data-del="${q.id}">Excluir</button>
@@ -237,7 +404,10 @@ socket.on('state', st => {
 $('#qList').onclick = e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.edit) startEdit(b.dataset.edit);
-  if ('act' in b.dataset)send('admin:setActive', { id: b.dataset.act || null });
+  if (b.dataset.up) send('admin:move', { id: b.dataset.up, dir: -1 });
+  if (b.dataset.down) send('admin:move', { id: b.dataset.down, dir: 1 });
+  if (b.dataset.reveal) send('admin:reveal', { id: b.dataset.reveal });
+  if ('act' in b.dataset) send('admin:setActive', { id: b.dataset.act || null });
   if (b.dataset.reset && confirm('Zerar todas as respostas desta pergunta?')) send('admin:reset', { id: b.dataset.reset });
   if (b.dataset.del && confirm('Excluir esta pergunta?')) send('admin:delete', { id: b.dataset.del });
   if (b.dataset.hide) send('admin:hideAnswer', { id: b.dataset.q, answerId: b.dataset.hide });
@@ -249,15 +419,19 @@ socket.on('connect', () => {
   socket.emit('admin:join', { code, token, backup }, res => {
     if (!res.ok) {
       home();
-      alert('Não foi possível abrir esta sessão: o servidor reiniciou e não havia cópia salva dela neste navegador. Crie uma nova sessão (as sessões novas já ficam protegidas contra isso).');
+      alert('Não foi possível abrir esta sessão neste navegador. Use “Abrir sessão criada em outro computador” com o código e a chave do apresentador.');
       return;
     }
     $('#panel').hidden = false;
     adminKey = res.key || '';
     try { const list = store(), me = list.find(x => x.code === code); if (me && res.key) { me.key = res.key; localStorage.setItem('mySessions', JSON.stringify(list)); } } catch (_) {}
     $('#screenLink').href = '/tela/' + code;
+    $('#exportLink').href = `/export/${code}.xlsx?t=${encodeURIComponent(token)}`;
+    $('#pLink').textContent = participantLink();
+    drawQr();
   });
 });
+syncForm();
 </script>
 </body>
 </html>

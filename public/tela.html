@@ -11,14 +11,26 @@
   .stage { min-height: 0; display: flex; align-items: center; justify-content: center; }
   .footer { display: flex; justify-content: space-between; align-items: center; color: #b9b5d8; font-size: clamp(.9rem, 1.6vw, 1.4rem); }
   .footer b { color: #fff; letter-spacing: .08em; }
-  .count { font-size: clamp(1rem, 2vw, 1.8rem); color: #b9b5d8; }
+  .count { font-size: clamp(1rem, 2vw, 1.8rem); color: #b9b5d8; white-space: nowrap; }
 
   /* Barras */
   .bars { width: 100%; height: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 3vw; padding-top: 6vh; }
-  .bcol { flex: 1; max-width: 220px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+  .bcol { flex: 1; max-width: 220px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; transition: opacity .5s; }
   .bval { font-size: clamp(1.2rem, 3vw, 3rem); font-weight: 800; margin-bottom: 1vh; }
   .bbar { width: 100%; border-radius: 12px 12px 4px 4px; transition: height .6s cubic-bezier(.2,.8,.2,1); min-height: 6px; }
   .blabel { margin-top: 1.5vh; text-align: center; font-size: clamp(.9rem, 1.7vw, 1.6rem); font-weight: 600; min-height: 2.6em; }
+  .bcol.dim { opacity: .28; }
+  .bcol.right .bbar { box-shadow: 0 0 0 4px #fff, 0 0 40px rgba(39, 165, 154, .8); }
+  .bcol.right .blabel::before { content: '✔ '; color: #4ade80; }
+  .scale-bars { gap: 1.4vw; }
+  .scale-bars .blabel { min-height: 1.4em; font-size: clamp(1.1rem, 2.2vw, 2rem); }
+
+  /* Escala */
+  .scalewrap { width: 100%; height: 100%; display: flex; flex-direction: column; }
+  .scalewrap .bars { flex: 1; min-height: 0; height: auto; padding-top: 4vh; }
+  .avg { text-align: center; font-size: clamp(1.1rem, 2.2vw, 2rem); color: #b9b5d8; }
+  .avg b { color: #fff; font-size: 1.8em; margin-left: .3em; }
+  .ends { display: flex; justify-content: space-between; color: #b9b5d8; font-size: clamp(.9rem, 1.5vw, 1.4rem); margin-top: 1vh; }
 
   /* Nuvem */
   .cloud { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 1vh 2.4vw; max-width: 90vw; }
@@ -26,9 +38,19 @@
 
   /* Mural */
   .wall { columns: 3 280px; column-gap: 20px; width: 100%; height: 100%; overflow: hidden; }
-    .note.new { animation: pop .4s ease; }
+  .note.new { animation: pop .4s ease; }
   .note { break-inside: avoid; background: #fff; color: #1d1b2e; border-radius: 14px; padding: 16px 18px; margin-bottom: 20px; font-size: clamp(1rem, 1.6vw, 1.5rem); border-top: 6px solid var(--c); }
   @keyframes pop { from { transform: scale(.85); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  /* Ranking */
+  .rank { width: min(1100px, 100%); display: flex; flex-direction: column; gap: 1.2vh; }
+  .rrow { display: grid; grid-template-columns: 4.5em 1fr auto; align-items: center; gap: 1.2vw; font-size: clamp(1rem, 2.1vw, 2rem); animation: pop .5s ease both; }
+  .rrow .pos { font-weight: 900; text-align: center; }
+  .rrow .name { position: relative; padding: .45em .8em; border-radius: 12px; background: rgba(255,255,255,.08); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 700; }
+  .rrow .fill { position: absolute; inset: 0 auto 0 0; background: rgba(138,125,255,.35); border-radius: 12px; z-index: 0; }
+  .rrow .name span { position: relative; z-index: 1; }
+  .rrow .sc { font-weight: 800; min-width: 4.5em; text-align: right; }
+  .rrow.top1 .name { background: rgba(242,179,61,.18); } .rrow.top1 .fill { background: rgba(242,179,61,.55); }
 
   /* Espera / entrada */
   .splash { display: flex; gap: 6vw; align-items: center; }
@@ -44,7 +66,7 @@
 <body>
 <button class="fs small ghost" onclick="document.documentElement.requestFullscreen && document.documentElement.requestFullscreen()" style="color:#fff">⛶ Tela cheia</button>
 <div class="screen">
-  <div class="row" style="justify-content:space-between;align-items:flex-start">
+  <div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:nowrap">
     <div class="question" id="q"></div>
     <div class="count" id="count"></div>
   </div>
@@ -60,8 +82,21 @@ const colors = ['--c1','--c2','--c3','--c4','--c5','--c6','--c7','--c8','--c9','
 const code = location.pathname.split('/').pop();
 const host = location.host;
 const socket = io();
-let lastKey = '';
+let lastKey = '', last = null;
 const seen = new Set();
+
+// Se este navegador é o do apresentador, as setas do teclado (ou o passador de slides) também funcionam aqui
+let token = null;
+try { token = (JSON.parse(localStorage.getItem('mySessions') || '[]').find(x => x.code === code) || {}).token || null; } catch (_) {}
+document.addEventListener('keydown', e => {
+  if (!token || !last || !last.questions.length) return;
+  const fwd = e.key === 'ArrowRight' || e.key === 'PageDown', back = e.key === 'ArrowLeft' || e.key === 'PageUp';
+  if (!fwd && !back) return;
+  e.preventDefault();
+  const qs = last.questions, i = qs.findIndex(q => q.id === last.activeId);
+  const j = i < 0 ? (fwd ? 0 : qs.length - 1) : Math.min(qs.length - 1, Math.max(0, i + (fwd ? 1 : -1)));
+  if (i !== j || last.screen === 'ranking') socket.emit('admin:setActive', { code, token, id: qs[j].id });
+});
 
 // se o servidor reiniciou, espera o apresentador abrir o painel (que recria a sessão) e tenta de novo
 function joinScreen() {
@@ -71,9 +106,45 @@ function joinScreen() {
 }
 socket.on('connect', joinScreen);
 
+const fmt = n => n.toLocaleString('pt-BR');
+
+function bars(q, extraClass = '') {
+  return `<div class="bars ${extraClass}">${q.options.map((o, i) => `<div class="bcol"><div class="bval"></div><div class="bbar" style="height:0;background:${colors[(q.type === 'scale' ? i * 3 : i) % colors.length]}"></div><div class="blabel">${esc(o)}</div></div>`).join('')}</div>`;
+}
+function updateBars(stage, q) {
+  const total = q.counts.reduce((a, b) => a + b, 0);
+  const max = Math.max(1, ...q.counts);
+  const reveal = q.correct !== null && q.revealed;
+  requestAnimationFrame(() => stage.querySelectorAll('.bcol').forEach((col, i) => {
+    const n = q.counts[i];
+    col.querySelector('.bval').textContent = total ? `${Math.round(n / total * 100)}%` : '0%';
+    col.querySelector('.bbar').style.height = `calc(${n / max} * (100% - 12vh))`;
+    col.classList.toggle('right', reveal && i === q.correct);
+    col.classList.toggle('dim', reveal && i !== q.correct);
+  }));
+}
+
 socket.on('state', st => {
+  last = st;
   const q = st.questions.find(x => x.id === st.activeId);
   const stage = $('#stage');
+  const footer = `<div>Acesse <b>${esc(host)}</b> · código <b>${code}</b></div><img class="qr-small" src="/qr/${code}.svg" alt="">`;
+
+  if (st.screen === 'ranking') {
+    lastKey = '';
+    $('#q').textContent = '🏆 Ranking';
+    $('#count').textContent = st.ranking.length ? `${st.ranking.length} participante(s)` : '';
+    $('#footer').innerHTML = footer;
+    const top = st.ranking.slice(0, 10), max = Math.max(1, ...top.map(p => p.score));
+    const medal = i => ['🥇', '🥈', '🥉'][i] || `${i + 1}º`;
+    stage.innerHTML = top.length
+      ? `<div class="rank">${top.map((p, i) => `<div class="rrow ${i === 0 ? 'top1' : ''}" style="animation-delay:${(top.length - i) * 0.12}s">
+          <div class="pos">${medal(i)}</div>
+          <div class="name"><div class="fill" style="width:${p.score / max * 100}%"></div><span>${esc(p.name)}</span></div>
+          <div class="sc">${fmt(p.score)}</div></div>`).join('')}</div>`
+      : `<div class="hiddenres">Ninguém pontuou ainda.</div>`;
+    return;
+  }
 
   if (!q) {
     lastKey = '';
@@ -88,23 +159,24 @@ socket.on('state', st => {
 
   $('#q').textContent = q.text;
   $('#count').textContent = `👥 ${q.total}`;
-  $('#footer').innerHTML = `<div>Acesse <b>${esc(host)}</b> · código <b>${code}</b></div><img class="qr-small" src="/qr/${code}.svg" alt="">`;
+  $('#footer').innerHTML = footer;
 
   if (!st.showResults) { lastKey = ''; stage.innerHTML = `<div class="hiddenres">Respostas recebidas: <b style="color:#fff">${q.total}</b><br><span style="font-size:.7em">Os resultados serão revelados em instantes…</span></div>`; return; }
 
-  const key = q.id + q.type + JSON.stringify(q.options);
+  const key = q.id + q.type + JSON.stringify(q.options) + JSON.stringify(q.scaleLabels);
   if (q.type === 'choice') {
     // mantém os elementos para animar as barras
+    if (lastKey !== key) stage.innerHTML = bars(q);
+    updateBars(stage, q);
+  } else if (q.type === 'scale') {
     if (lastKey !== key) {
-      stage.innerHTML = `<div class="bars">${q.options.map((o, i) => `<div class="bcol"><div class="bval"></div><div class="bbar" style="height:0;background:${colors[i % colors.length]}"></div><div class="blabel">${esc(o)}</div></div>`).join('')}</div>`;
+      const [lo, hi] = q.scaleLabels || [];
+      stage.innerHTML = `<div class="scalewrap"><div class="avg">Média<b id="avgVal">—</b></div>${bars(q, 'scale-bars')}
+        <div class="ends"><span>${lo ? `${esc(q.options[0])} = ${esc(lo)}` : ''}</span><span>${hi ? `${esc(q.options[q.options.length - 1])} = ${esc(hi)}` : ''}</span></div></div>`;
     }
-    const total = q.counts.reduce((a, b) => a + b, 0);
-    const max = Math.max(1, ...q.counts);
-    requestAnimationFrame(() => stage.querySelectorAll('.bcol').forEach((col, i) => {
-      const n = q.counts[i];
-      col.querySelector('.bval').textContent = total ? `${Math.round(n / total * 100)}%` : '0%';
-      col.querySelector('.bbar').style.height = `calc(${n / max} * (100% - 12vh))`;
-    }));
+    const tot = q.counts.reduce((a, b) => a + b, 0);
+    $('#avgVal').textContent = tot ? (q.counts.reduce((a, c, i) => a + c * Number(q.options[i]), 0) / tot).toFixed(1).replace('.', ',') : '—';
+    updateBars(stage, q);
   } else if (q.type === 'words') {
     const entries = Object.entries(q.words).sort((a, b) => b[1] - a[1]).slice(0, 60);
     const max = Math.max(1, ...entries.map(e => e[1]));

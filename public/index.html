@@ -4,6 +4,15 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Enquete ao vivo</title>
 <link rel="stylesheet" href="/style.css">
+<style>
+  .scale { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 8px; }
+  .scale .option { width: 52px; height: 52px; padding: 0; margin: 0; text-align: center; font-size: 1.2rem; font-weight: 700; }
+  .scale-labels { display: flex; justify-content: space-between; gap: 12px; font-size: .85rem; color: var(--muted); margin-bottom: 14px; }
+  .me { text-align: center; color: var(--muted); font-size: .92rem; margin-top: 4px; }
+  .me b { color: var(--text); }
+  .result-ok { color: var(--ok); }
+  .result-no { color: var(--danger); }
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -21,6 +30,7 @@
   <div id="vote" hidden>
     <p class="muted" id="sessTitle"></p>
     <div class="card" id="qCard"></div>
+    <div class="me" id="me"></div>
   </div>
 </div>
 
@@ -29,13 +39,13 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 const socket = io();
+const ls = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
 
 // ID anônimo deste navegador (apenas para impedir voto duplo; o servidor guarda só um hash)
-let voterId = localStorage.getItem('voterId');
-if (!voterId) { voterId = crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now(); localStorage.setItem('voterId', voterId); }
+let voterId = ls.get('voterId');
+if (!voterId) { voterId = crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now(); ls.set('voterId', voterId); }
 
 let code = new URLSearchParams(location.search).get('c');
-let current = null;
 
 function showJoin(msg) { $('#join').hidden = false; $('#vote').hidden = true; $('#joinErr').textContent = msg || ''; }
 
@@ -45,24 +55,67 @@ function join() {
     history.replaceState(null, '', '/?c=' + code);
     $('#join').hidden = true; $('#vote').hidden = false;
     $('#sessTitle').textContent = res.title;
-    render(res.question, res.voted);
+    render(res);
   });
 }
 
+const pts = n => n.toLocaleString('pt-BR');
+const center = (icon, title, text) => `<div class="center"><div class="big-check">${icon}</div><h2>${title}</h2>${text ? `<p class="muted">${text}</p>` : ''}</div>`;
+
 let renderedKey = '';
-function render(q, voted) {
-  // não apagar o que a pessoa está digitando se a pergunta não mudou
-  const key = (q ? q.id + '.' + q.v : 'none') + ':' + !!voted;
+function render(res) {
+  const q = res.question, me = res.me;
+  $('#me').innerHTML = me ? `👤 <b>${esc(me.name)}</b> · ${pts(me.score)} pts${me.rank ? ` · <b>${me.rank}º</b> de ${me.players}` : ''}` : '';
+
+  const needName = q && q.quiz && !res.voted && !me && !ls.get('skipName:' + code);
+  // não apagar o que a pessoa está digitando se nada importante mudou
+  const key = JSON.stringify([res.screen, q && q.id, q && q.v, res.voted, q && q.revealed, res.result, needName]);
   if (key === renderedKey) return;
   renderedKey = key;
-  current = q;
   const box = $('#qCard');
-  if (!q) { box.innerHTML = '<div class="center"><div class="big-check">⏳</div><h2>Aguarde…</h2><p class="muted">A próxima pergunta vai aparecer aqui automaticamente.</p></div>'; return; }
-  if (voted) { box.innerHTML = `<div class="center"><div class="big-check">✅</div><h2>Resposta enviada!</h2><p class="muted">Olhe o telão. A próxima pergunta aparece aqui sozinha.</p></div>`; return; }
+
+  if (res.screen === 'ranking') {
+    box.innerHTML = center('🏆', 'Olhe o telão!', me && me.rank ? `Você está em <b>${me.rank}º lugar</b> com <b>${pts(me.score)} pontos</b>.` : 'O ranking do quiz está sendo exibido.');
+    return;
+  }
+  if (!q) { box.innerHTML = center('⏳', 'Aguarde…', 'A próxima pergunta vai aparecer aqui automaticamente.'); return; }
+
+  if (needName) {
+    box.innerHTML = `<h2>🏆 Vamos de quiz!</h2>
+      <p class="muted">Escolha um apelido para aparecer no ranking. Não use seu nome se não quiser ser identificado(a).</p>
+      <input id="nick" maxlength="20" placeholder="Ex.: Girassol">
+      <button id="nickBtn" class="full" style="margin-top:12px">Entrar no quiz</button>
+      <button id="skipBtn" class="full ghost" style="margin-top:8px">Responder sem aparecer no ranking</button>
+      <div id="err" class="error"></div>`;
+    $('#nickBtn').onclick = () => socket.emit('p:setName', { code, voterId, name: $('#nick').value }, r => {
+      if (r && r.ok) join(); else $('#err').textContent = (r && r.msg) || 'Erro.';
+    });
+    $('#nick').addEventListener('keydown', e => { if (e.key === 'Enter') $('#nickBtn').click(); });
+    $('#skipBtn').onclick = () => { ls.set('skipName:' + code, '1'); join(); };
+    return;
+  }
+
+  if (res.voted) {
+    if (q.quiz && q.revealed && res.result) {
+      box.innerHTML = res.result.correct
+        ? center('🎉', '<span class="result-ok">Você acertou!</span>', `+${pts(res.result.points)} pontos`)
+        : center('😕', '<span class="result-no">Não foi dessa vez</span>', `Resposta certa: <b>${esc(q.correctText)}</b>`);
+    } else if (q.quiz) {
+      box.innerHTML = center('✅', 'Resposta enviada!', 'Aguarde: a resposta certa vai aparecer no telão.');
+    } else {
+      box.innerHTML = center('✅', 'Resposta enviada!', 'Olhe o telão. A próxima pergunta aparece aqui sozinha.');
+    }
+    return;
+  }
 
   let html = `<h2>${esc(q.text)}</h2>`;
   if (q.type === 'choice') {
     html += q.options.map((o, i) => `<button class="option" data-i="${i}">${esc(o)}</button>`).join('');
+    html += `<button id="send" class="full" disabled>Enviar</button>`;
+  } else if (q.type === 'scale') {
+    html += `<div class="scale">${q.options.map((o, i) => `<button class="option" data-i="${i}">${esc(o)}</button>`).join('')}</div>`;
+    const [lo, hi] = q.scaleLabels || [];
+    html += `<div class="scale-labels"><span>${lo ? `${esc(q.options[0])} = ${esc(lo)}` : ''}</span><span style="text-align:right">${hi ? `${esc(q.options[q.options.length - 1])} = ${esc(hi)}` : ''}</span></div>`;
     html += `<button id="send" class="full" disabled>Enviar</button>`;
   } else if (q.type === 'words') {
     html += `<p class="muted">Até 3 palavras (uma por campo).</p>
@@ -82,13 +135,13 @@ function render(q, voted) {
   });
   $('#send').onclick = () => {
     let value;
-    if (q.type === 'choice') value = choice;
+    if (q.type === 'choice' || q.type === 'scale') value = choice;
     else if (q.type === 'words') value = [...box.querySelectorAll('.w')].map(i => i.value);
     else value = $('#txt').value;
     $('#send').disabled = true;
-    socket.emit('p:vote', { code, voterId, questionId: q.id, value }, res => {
-      if (res && res.ok) render(q, true);
-      else { $('#err').textContent = (res && res.msg) || 'Erro ao enviar.'; $('#send').disabled = false; }
+    socket.emit('p:vote', { code, voterId, questionId: q.id, value }, r => {
+      if (r && r.ok) join();
+      else { $('#err').textContent = (r && r.msg) || 'Erro ao enviar.'; $('#send').disabled = false; }
     });
   };
 }

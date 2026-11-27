@@ -11,6 +11,8 @@ App no estilo Mentimeter: o público responde pelo celular, **sem login e de for
 
 ## Tipos de pergunta
 - **Múltipla escolha** → gráfico de barras animado com %
+- **Quiz** → múltipla escolha com resposta correta: quem acerta ganha de 500 a 1000 pontos (mais rápido = mais pontos), com apelido opcional e ranking no telão
+- **Escala** → notas de 1 a 5 ou de 0 a 10, com a média no telão
 - **Nuvem de palavras** → até 3 palavras por pessoa; as mais citadas ficam maiores
 - **Resposta aberta** → mural de cartões (o apresentador pode ocultar respostas impróprias)
 
@@ -47,3 +49,10 @@ Qualquer Postgres funciona (Neon, Supabase, Render Postgres…). A tabela é cri
 
 ## Abrir a sessão em outro computador
 No painel da sessão aparecem o **código** e a **chave do apresentador** (clique em *Mostrar*). Em outro computador, acesse `/admin` → *Abrir sessão criada em outro computador* e digite os dois.
+
+## Durante a apresentação
+- **◀ Anterior / Próxima ▶** no painel, ou as **setas ← →** do teclado (também funcionam no telão, se ele estiver aberto no mesmo navegador do painel).
+- **✔ Revelar resposta** (quiz): destaca a resposta certa no telão e mostra "acertou/errou" no celular.
+- **🏆 Mostrar ranking**: exibe o ranking do quiz no telão.
+- **📱 QR code para o slide**: copie ou baixe a imagem e cole no PowerPoint.
+- **⬇️ Exportar Excel**: baixa os resultados (resumo, respostas abertas e ranking).
